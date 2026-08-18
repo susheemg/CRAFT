@@ -14,16 +14,57 @@
 -- The practical rule this encodes: the credential that serves requests must
 -- not be able to alter the schema, disable a trigger, or read across tenants.
 
+-- On managed PostgreSQL the owning role is not a superuser, and PostgreSQL
+-- treats NOSUPERUSER / NOBYPASSRLS as *changing* those attributes even when it
+-- is restating the default. CREATE ROLE tolerates that from a CREATEROLE
+-- holder; ALTER ROLE does not, and fails with "Only roles with the SUPERUSER
+-- attribute may change the SUPERUSER attribute". So the keywords are gone.
+--
+-- Removing them must not remove the guarantee they were there to express, and
+-- that guarantee is the entire reason this migration exists: a role holding
+-- SUPERUSER or BYPASSRLS is exempt from every tenant policy in the database.
+-- The attributes are therefore verified after the fact and the migration
+-- refuses to continue if they are wrong — an assertion rather than a hope.
 DO $$
 DECLARE
     app_password text := coalesce(
         current_setting('craft.app_password', true), 'craft_app_local_dev'
     );
+    is_superuser boolean;
+    can_bypass_rls boolean;
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'craft_app') THEN
-        EXECUTE format('ALTER ROLE craft_app LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE', app_password);
+        -- The role may pre-date this deployment, or have been created by a
+        -- different credential. On managed PostgreSQL a CREATEROLE holder may
+        -- only alter roles it has ADMIN on, so this can legitimately fail
+        -- without anything being wrong. Rotating the password then needs a
+        -- connection that does hold that admin option — which is a real
+        -- constraint to know about, not a reason to abort a schema migration.
+        BEGIN
+            EXECUTE format('ALTER ROLE craft_app LOGIN PASSWORD %L NOCREATEDB NOCREATEROLE', app_password);
+        EXCEPTION WHEN insufficient_privilege THEN
+            RAISE NOTICE
+                'craft_app exists but this credential cannot alter it, so its '
+                'password was left unchanged. If CRAFT_APP_DB_PASSWORD was '
+                'changed, the application will fail to authenticate until the '
+                'role is altered by a credential holding ADMIN on it.';
+        END;
     ELSE
-        EXECUTE format('CREATE ROLE craft_app LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE', app_password);
+        EXECUTE format('CREATE ROLE craft_app LOGIN PASSWORD %L NOCREATEDB NOCREATEROLE', app_password);
+    END IF;
+
+    SELECT rolsuper, rolbypassrls
+      INTO is_superuser, can_bypass_rls
+      FROM pg_roles WHERE rolname = 'craft_app';
+
+    IF is_superuser OR can_bypass_rls THEN
+        RAISE EXCEPTION
+            'craft_app holds % % — row-level security would not apply to it, so '
+            'tenant isolation would be decoration. Revoke the attribute with a '
+            'superuser connection before deploying.',
+            CASE WHEN is_superuser THEN 'SUPERUSER' ELSE '' END,
+            CASE WHEN can_bypass_rls THEN 'BYPASSRLS' ELSE '' END
+            USING ERRCODE = 'insufficient_privilege';
     END IF;
 END;
 $$;
@@ -73,7 +114,17 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA audit GRANT USAGE, SELECT ON SEQUENCES TO cra
 -- Evidence is append-only for the same reason as the log.
 REVOKE UPDATE, DELETE ON core.evidence_record FROM craft_app;
 
-COMMENT ON ROLE craft_app IS
-    'Application login role. Not a superuser and not a table owner, so row-level '
-    'security applies to it. Cannot alter schema, disable triggers, or modify the '
-    'audit log.';
+-- Documentation, not a control. COMMENT ON ROLE needs the ADMIN option on the
+-- role, which the migrating credential holds only if it created craft_app
+-- itself. Where the role pre-dates this deployment, the comment is skipped
+-- rather than failing a schema migration over a docstring.
+DO $$
+BEGIN
+    COMMENT ON ROLE craft_app IS
+        'Application login role. Not a superuser and not a table owner, so '
+        'row-level security applies to it. Cannot alter schema, disable '
+        'triggers, or modify the audit log.';
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'Could not comment on role craft_app (no ADMIN option); continuing.';
+END;
+$$;
