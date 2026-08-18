@@ -26,7 +26,7 @@ mandate a database record rather than a property of the code.
 
 | | Before | After |
 |---|---|---|
-| Tests | 142 | **198** |
+| Tests | 142 | **201** |
 | Processes | 36 | **55** |
 | Activities | — | 243 (32.9% unattended) |
 | Domains | 10 | **11** (added `APS`) |
@@ -217,7 +217,7 @@ work. Until then the charter table is a schema, not a running control.
 
 ```bash
 python -m app.migrate          # applies 0006, idempotent
-python -m pytest               # 198 tests
+python -m pytest               # 201 tests
 python docs/generate_sop.py > docs/SOP_Manual.md
 ```
 

@@ -15,6 +15,7 @@ properties that a mock cannot demonstrate.
 from __future__ import annotations
 
 import os
+import pathlib
 
 import uuid
 
@@ -427,3 +428,60 @@ class TestPreflight:
         )
         assert code == 1
         assert "CRAFT_SECRET_KEY" in output
+
+
+class TestManagedPostgresCompatibility:
+    """Migration 0003 against a database owner that is not a superuser.
+
+    Every managed PostgreSQL service — Render, Neon, Supabase, RDS — gives you
+    an owner with CREATEROLE and no SUPERUSER. Migration 0003 originally wrote
+    NOSUPERUSER and NOBYPASSRLS explicitly, and PostgreSQL treats those as
+    *changing* the attributes even when restating the default: CREATE ROLE
+    tolerates it from a CREATEROLE holder, ALTER ROLE does not. The migration
+    therefore worked on a local superuser and failed on every managed service,
+    which is the whole class of bug this codebase keeps finding.
+    """
+
+    def test_the_role_migration_states_no_superuser_only_attributes(self):
+        migration = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "db" / "migrations" / "0003_app_role.sql"
+        ).read_text()
+        # Comments explain why the keywords are absent, so scan the executable
+        # statements only rather than the file as a whole.
+        statements = "\n".join(
+            line for line in migration.splitlines() if not line.lstrip().startswith("--")
+        )
+        for keyword in ("NOSUPERUSER", "NOBYPASSRLS"):
+            assert keyword not in statements, (
+                f"0003 states {keyword} in an executable statement, which only a "
+                "superuser may do. Managed PostgreSQL will refuse it."
+            )
+
+    def test_the_guarantee_those_keywords_expressed_is_still_asserted(self):
+        """Dropping the keywords must not drop the property. A role holding
+        SUPERUSER or BYPASSRLS is exempt from every tenant policy, so the
+        migration verifies the attributes and refuses to continue if they are
+        wrong."""
+        migration = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "db" / "migrations" / "0003_app_role.sql"
+        ).read_text()
+        assert "rolsuper" in migration and "rolbypassrls" in migration
+        assert "RAISE EXCEPTION" in migration
+
+    def test_the_application_role_is_not_exempt_from_row_level_security(self, tenant_id):
+        """The property itself, checked against the running database rather than
+        against the migration text."""
+        from sqlalchemy import text
+
+        with session_scope(tenant_id=tenant_id) as db:
+            row = db.execute(
+                text(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles "
+                    "WHERE rolname = current_user"
+                )
+            ).one()
+        is_superuser, bypasses_rls = row
+        assert not is_superuser, "the serving credential is a superuser; RLS does not apply to it"
+        assert not bypasses_rls, "the serving credential holds BYPASSRLS; tenant policies are decoration"

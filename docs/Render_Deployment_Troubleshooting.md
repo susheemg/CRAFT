@@ -107,6 +107,30 @@ Run it against any environment file directly:
 docker run --rm --env-file .env craft python -m app.preflight
 ```
 
+## `permission denied to alter role` during migration 0003
+
+```
+psycopg.errors.InsufficientPrivilege: permission denied to alter role
+DETAIL:  Only roles with the SUPERUSER attribute may change the SUPERUSER attribute.
+CONTEXT:  "ALTER ROLE craft_app LOGIN PASSWORD '...' NOSUPERUSER NOBYPASSRLS ..."
+```
+
+A bug in migration 0003, fixed. Every managed PostgreSQL service gives you an
+owner with `CREATEROLE` and no `SUPERUSER`. PostgreSQL treats `NOSUPERUSER` and
+`NOBYPASSRLS` as *changing* those attributes even when restating the default:
+`CREATE ROLE` tolerates that from a `CREATEROLE` holder, `ALTER ROLE` does not.
+The migration worked on a local superuser and failed on every managed service.
+
+The keywords are gone. What they expressed is now asserted instead: the
+migration reads `rolsuper` and `rolbypassrls` back from `pg_roles` and refuses
+to continue if either is set, because a role holding them is exempt from every
+tenant policy in the database. Two statements that need the `ADMIN` option on
+`craft_app` — the password `ALTER` and `COMMENT ON ROLE` — are now tolerated
+when it is absent, with a notice, rather than failing a schema migration.
+
+Because 0003 failed, it was never recorded as applied, so the corrected file
+applies cleanly on the next deploy with no manual cleanup.
+
 ## Things that look like this but are not
 
 | Symptom | Actual cause |
