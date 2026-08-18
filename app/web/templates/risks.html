@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% set active = 'risks' %}
+{% block title %}Risk register · CRAFT{% endblock %}
+
+{% block content %}
+<h1>Risk register</h1>
+<p class="lede">
+  {{ summary.total }} risks recorded, {{ summary.open }} open.
+  {{ summary.above_appetite }} sit at
+  <strong>{{ acceptance_threshold|replace('_',' ') }}</strong> or above, which is
+  where acceptance stops being a note and becomes a decision an authorised
+  person has to make.
+</p>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="tile-label">Above appetite</div>
+    <div class="tile-value {{ 'bad' if summary.above_appetite else 'ok' }}">{{ summary.above_appetite }}</div>
+    <div class="tile-note">need treatment or a named acceptance</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Average residual</div>
+    <div class="tile-value">{{ summary.average_residual }}</div>
+    <div class="tile-note">across open risks, out of 25</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Treatment overdue</div>
+    <div class="tile-value {{ 'warn' if summary.overdue_treatment else 'ok' }}">{{ summary.overdue_treatment }}</div>
+    <div class="tile-note">past the agreed date</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Review overdue</div>
+    <div class="tile-value {{ 'warn' if summary.overdue_review else 'ok' }}">{{ summary.overdue_review }}</div>
+    <div class="tile-note">scores may be stale</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Accepted</div>
+    <div class="tile-value">{{ summary.by_status.get('accepted', 0) }}</div>
+    <div class="tile-note">with a recorded rationale</div>
+  </div>
+</div>
+
+<h2>Where the register sits on the matrix</h2>
+<div class="cols-2">
+  <div class="card">
+    <table class="heatmap" style="margin:0 auto">
+      <tr><th></th><th colspan="5" style="padding-bottom:8px">Impact →</th></tr>
+      {% for likelihood in [5,4,3,2,1] %}
+      <tr>
+        <th style="text-align:right;padding-right:8px">{{ likelihood }}</th>
+        {% for impact in [1,2,3,4,5] %}
+          {% set cell = heatmap.cells[likelihood][impact] %}
+          <td class="{{ 'hm-' ~ cell.band if cell.count else 'empty' }}"
+              title="Score {{ cell.score }} — {{ cell.band|replace('_',' ') }}">
+            {{ cell.count if cell.count else '·' }}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      <tr><th></th>{% for impact in [1,2,3,4,5] %}<th>{{ impact }}</th>{% endfor %}</tr>
+    </table>
+    <p class="small muted" style="text-align:center;margin:12px 0 0">
+      Likelihood on the vertical, impact on the horizontal. {{ heatmap.basis|capitalize }} scores.
+    </p>
+  </div>
+  <div class="card">
+    <h3>Distribution by band</h3>
+    {% for band in ['very_high','high','medium','low','very_low'] %}
+      {% set count = summary.by_band.get(band, 0) %}
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:9px">
+        <span class="pill pill-{{ band }}" style="min-width:78px;text-align:center">{{ band|replace('_',' ') }}</span>
+        <div class="bar" style="flex:1">
+          <span style="width:{{ (count / summary.total * 100) if summary.total else 0 }}%"></span>
+        </div>
+        <span class="bar-figure">{{ count }}</span>
+      </div>
+    {% endfor %}
+    <p class="small muted" style="margin-top:16px;margin-bottom:0">
+      A register with nothing in the upper bands usually means scoring is
+      optimistic rather than that the organisation is safe.
+    </p>
+  </div>
+</div>
+
+<h2>All risks</h2>
+<div class="filters">
+  <a href="/risks" class="{{ 'on' if not active_band }}">All</a>
+  {% for band in ['very_high','high','medium','low','very_low'] %}
+    <a href="/risks?band={{ band }}" class="{{ 'on' if active_band == band }}">
+      {{ band|replace('_',' ')|capitalize }} ({{ summary.by_band.get(band, 0) }})</a>
+  {% endfor %}
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:90px">Reference</th><th>Risk</th><th style="width:130px">Category</th>
+        <th class="num" style="width:80px">Inherent</th><th class="num" style="width:80px">Residual</th>
+        <th style="width:90px">Band</th><th style="width:100px">Treatment</th>
+        <th style="width:90px">Status</th><th style="width:100px">Review</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in risks %}
+      <tr>
+        <td class="mono nowrap">{{ r.risk_ref }}</td>
+        <td>
+          {{ r.title }}
+          {% if r.status.value == 'accepted' and r.acceptance_rationale %}
+          <div class="small muted" style="margin-top:3px">
+            Accepted{% if r.accepted_at %} {{ r.accepted_at.strftime('%d %b %Y') }}{% endif %}:
+            {{ r.acceptance_rationale|truncate(120) }}
+          </div>
+          {% endif %}
+        </td>
+        <td class="small muted">{{ r.category|replace('_',' ') }}</td>
+        <td class="num">{{ r.inherent_score }}</td>
+        <td class="num"><strong>{{ r.residual_score if r.residual_score is not none else '—' }}</strong></td>
+        <td><span class="pill pill-{{ r.severity_band.value }}">{{ r.severity_band.value|replace('_',' ') }}</span></td>
+        <td class="small">{{ r.treatment.value }}</td>
+        <td class="small">{{ r.status.value|replace('_',' ') }}</td>
+        <td class="small nowrap">
+          {% if r.review_at %}
+            {% if r.review_at < now and r.status.value != 'closed' %}
+              <span class="pill pill-warn">overdue</span>
+            {% else %}{{ r.review_at.strftime('%d %b %y') }}{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if not risks %}
+<div class="empty"><strong>No risks recorded</strong>
+  Add one through <span class="mono">POST /v1/risks</span> or the MCP tool
+  <span class="mono">craft_create_risk</span>.</div>
+{% endif %}
+{% endblock %}

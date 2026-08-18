@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% set active = 'operations' %}
+{% block title %}Operations · CRAFT{% endblock %}
+
+{% block content %}
+<h1>Operations</h1>
+<p class="lede">
+  Live workflow runs, incidents and the statutory clocks attached to them.
+  Where a clock is running, the remaining time is shown rather than the deadline
+  alone.
+</p>
+
+<div class="cols-2">
+  <section>
+    <h2>{{ incidents|selectattr('status.value','ne','closed')|list|length }} open incident{{ '' if incidents|selectattr('status.value','ne','closed')|list|length == 1 else 's' }}</h2>
+    {% if incidents %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:90px">Number</th><th>Incident</th><th style="width:90px">Severity</th><th style="width:110px">Status</th></tr></thead>
+        <tbody>
+        {% for i in incidents %}
+          <tr>
+            <td class="mono nowrap">{{ i.incident_no }}</td>
+            <td>
+              {{ i.title }}
+              {% if i.involves_personal_data %}
+              <div class="small" style="margin-top:3px">
+                <span class="pill pill-warn">personal data</span>
+                <span class="muted">72-hour notification clock started {{ i.detected_at.strftime('%d %b %H:%M') if i.detected_at }}</span>
+              </div>
+              {% endif %}
+            </td>
+            <td><span class="pill pill-{{ i.severity.value }}">{{ i.severity.value|replace('_',' ') }}</span></td>
+            <td class="small">{{ i.status.value }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty"><strong>No incidents recorded</strong></div>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>{{ dsars|length }} subject request{{ '' if dsars|length == 1 else 's' }}</h2>
+    {% if dsars %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:100px">Reference</th><th style="width:110px">Type</th><th style="width:100px">Status</th><th>Statutory deadline</th></tr></thead>
+        <tbody>
+        {% for d in dsars %}
+          <tr>
+            <td class="mono nowrap">{{ d.request_ref }}</td>
+            <td class="small">{{ d.request_type }}</td>
+            <td class="small">{{ d.status|replace('_',' ') }}</td>
+            <td class="small nowrap">
+              {% if d.sla_due_at %}
+                {% set days = (d.sla_due_at - now).days %}
+                {% if d.status == 'released' %}<span class="muted">released</span>
+                {% elif days < 0 %}<span class="pill pill-bad">{{ -days }}d overdue</span>
+                {% elif days <= 7 %}<span class="pill pill-warn">{{ days }}d left</span>
+                {% else %}{{ days }} days left{% endif %}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty"><strong>No subject requests</strong></div>
+    {% endif %}
+  </section>
+</div>
+
+<h2>{{ plans|length }} continuity plan{{ '' if plans|length == 1 else 's' }}</h2>
+{% if plans %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Plan</th><th style="width:170px">Type</th><th class="num" style="width:90px">RTO</th>
+               <th class="num" style="width:90px">RPO</th><th style="width:130px">Approved</th></tr></thead>
+    <tbody>
+    {% for p in plans %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td class="small">{{ p.plan_type|replace('_',' ') }}</td>
+        <td class="num">{{ (p.rto_hours ~ 'h') if p.rto_hours is not none else '—' }}</td>
+        <td class="num">{{ (p.rpo_minutes ~ 'm') if p.rpo_minutes is not none else '—' }}</td>
+        <td class="small">
+          {% if p.approved_at %}{{ p.approved_at.strftime('%d %b %Y') }}
+          {% else %}<span class="pill pill-warn">unapproved</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty"><strong>No continuity plans recorded</strong>
+  ISO 22301 clause 8.4 expects documented plans, and clause 8.5 expects them exercised.</div>
+{% endif %}
+
+<h2>Recent workflow runs</h2>
+{% if runs %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:90px">Workflow</th><th>Name</th><th style="width:110px">Status</th>
+               <th style="width:150px">Started</th><th style="width:150px">Completed</th></tr></thead>
+    <tbody>
+    {% for run, wf in runs %}
+      <tr>
+        <td class="mono nowrap">{{ wf.wf_code }}</td>
+        <td>{{ wf.name }}</td>
+        <td>
+          {% set st = run.status.value %}
+          <span class="pill {{ 'pill-ok' if st == 'completed' else ('pill-warn' if st == 'awaiting_gate' else 'pill-neutral') }}">
+            {{ st|replace('_',' ') }}
+          </span>
+        </td>
+        <td class="small nowrap">{{ run.started_at.strftime('%d %b %H:%M') }}</td>
+        <td class="small nowrap">{{ run.completed_at.strftime('%d %b %H:%M') if run.completed_at else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty"><strong>No runs yet</strong>
+  {{ workflows|length }} workflow{{ '' if workflows|length == 1 else 's' }} are deployed and ready to start.</div>
+{% endif %}
+{% endblock %}

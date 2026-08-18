@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% set active = 'compliance' %}
+{% block title %}{{ framework.code }} · CRAFT{% endblock %}
+{% block content %}
+<h1>{{ framework.name }}</h1>
+<div class="empty" style="margin-top:24px">
+  <strong>This programme has not been started</strong>
+  Starting it creates an implementation record for each of its controls, which is
+  what readiness is measured against.
+  <p class="small mono" style="margin-top:14px">POST /v1/compliance/programmes {"framework": "{{ framework.code }}"}</p>
+</div>
+{% endblock %}

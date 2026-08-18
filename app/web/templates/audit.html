@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% set active = 'audit' %}
+{% block title %}Audit log · CRAFT{% endblock %}
+
+{% block content %}
+<h1>Audit log</h1>
+
+{% if report.is_intact %}
+<div class="banner ok">
+  <div>
+    <div class="banner-title">The chain is intact across {{ '{:,}'.format(report.rows_checked) }} entries</div>
+    <div class="banner-body">
+      Every entry hashes to its recorded value and links to the one before it, so
+      nothing has been altered, deleted or inserted since it was written.
+      Head: sequence {{ report.to_seq }}, <span class="mono">{{ (report.head_hash or '')[:24] }}</span>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="banner bad">
+  <div>
+    <div class="banner-title">The chain breaks at sequence {{ report.first_broken_seq }}</div>
+    <div class="banner-body">
+      {{ report.reason }} — treat every entry from that point onward as unverified
+      and investigate direct database access. Entries before it remain sound.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="filters">
+  <a href="/audit" class="{{ 'on' if not active_action }}">All</a>
+  {% for a, count in actions[:12] %}
+    <a href="/audit?action={{ a }}" class="{{ 'on' if active_action == a }}">{{ a }} ({{ count }})</a>
+  {% endfor %}
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th class="num" style="width:70px">Seq</th><th style="width:150px">When</th>
+          <th style="width:190px">Action</th><th style="width:190px">Actor</th>
+          <th>What changed</th><th style="width:110px">Hash</th></tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+      <tr>
+        <td class="num mono">{{ e.seq }}</td>
+        <td class="small nowrap">{{ e.created_at.strftime('%d %b %Y %H:%M:%S') }}</td>
+        <td class="small">
+          <span class="mono">{{ e.action }}</span>
+          {% if e.outcome != 'success' %}
+            <span class="pill pill-bad" style="margin-left:4px">{{ e.outcome }}</span>
+          {% endif %}
+        </td>
+        <td class="small">
+          {{ e.actor_ref }}
+          {% if e.actor_type.value == 'agent' %}<span class="pill pill-outline">agent</span>{% endif %}
+        </td>
+        <td class="small muted">
+          {% if e.before_state and e.after_state %}
+            {% for key in e.after_state.keys() %}
+              {% if e.before_state.get(key) != e.after_state.get(key) %}
+                <div><strong>{{ key }}</strong>:
+                  {{ e.before_state.get(key)|string|truncate(30) }} →
+                  {{ e.after_state.get(key)|string|truncate(30) }}</div>
+              {% endif %}
+            {% endfor %}
+          {% elif e.after_state %}
+            {{ e.after_state|string|truncate(110) }}
+          {% elif e.detail %}
+            {{ e.detail|string|truncate(110) }}
+          {% else %}—{% endif %}
+          {% if e.model %}
+            <div style="margin-top:3px"><span class="pill pill-outline">{{ e.model }}</span>
+              {% if e.prompt_version %}<span class="mono">{{ e.prompt_version }}</span>{% endif %}</div>
+          {% endif %}
+        </td>
+        <td class="mono small muted">{{ e.row_hash[:10] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if next_cursor %}
+<p style="margin-top:16px">
+  <a class="btn btn-secondary" href="/audit?cursor={{ next_cursor }}{% if active_action %}&action={{ active_action }}{% endif %}">
+    Older entries →</a>
+</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% set active = 'approvals' %}
+{% block title %}Approvals · CRAFT{% endblock %}
+
+{% block content %}
+<h1>Approvals</h1>
+<p class="lede">
+  Work stops here when an action is irreversible, statutory, high-risk or when
+  the model's confidence was too low to proceed. Only a person can decide a
+  gate, and never the person who raised it.
+</p>
+
+{% if gates %}
+<h2>{{ gates|length }} decision{{ '' if gates|length == 1 else 's' }} waiting</h2>
+{% for gate, allowed, blocked_reason in gates %}
+  <div class="gate {{ 'overdue' if gate.due_at and gate.due_at < now }}">
+    <div class="gate-head">
+      <div>
+        <div class="gate-summary">{{ gate.summary }}</div>
+        <div class="gate-meta">
+          <span class="mono">{{ gate.gate_type }}</span> ·
+          stopped because it is <strong>{{ gate.reason.value|replace('_',' ') }}</strong> ·
+          raised {{ gate.raised_at.strftime('%d %b %Y at %H:%M') }}
+        </div>
+      </div>
+      <div class="nowrap">
+        {% if gate.due_at and gate.due_at < now %}
+          <span class="pill pill-bad">overdue</span>
+        {% elif gate.due_at %}
+          <span class="pill pill-outline">due {{ gate.due_at.strftime('%d %b %H:%M') }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if gate.context %}
+    <div class="gate-context">
+      <dl>
+        {% for key, value in gate.context.items() %}
+          {% if key not in ['rationale'] and value is not none %}
+          <dt>{{ key|replace('_',' ')|capitalize }}</dt>
+          <dd>{{ value|string|truncate(160) }}</dd>
+          {% endif %}
+        {% endfor %}
+      </dl>
+      {% if gate.context.get('rationale') %}
+      <p style="margin:8px 0 0"><span class="muted">Case put by the requester:</span>
+        {{ gate.context['rationale'] }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if allowed %}
+      <p class="small" style="margin:12px 0 0">
+        Decide with
+        <span class="mono">POST /v1/gates/{{ gate.id }}:decide</span>
+        — the decision and its rationale are written to the audit log against your name.
+      </p>
+    {% else %}
+      <div class="gate-blocked">{{ blocked_reason }}</div>
+    {% endif %}
+  </div>
+{% endfor %}
+{% else %}
+<div class="empty"><strong>Nothing is waiting</strong>No workflow is currently blocked on a decision.</div>
+{% endif %}
+
+{% if decided %}
+<h2>Recently decided</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Decision</th><th style="width:170px">Type</th><th style="width:100px">Outcome</th>
+          <th style="width:150px">Decided</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+    {% for g in decided %}
+      <tr>
+        <td>{{ g.summary }}</td>
+        <td class="mono small">{{ g.gate_type }}</td>
+        <td>
+          <span class="pill {{ 'pill-ok' if g.decision.value == 'approved' else 'pill-bad' }}">
+            {{ g.decision.value }}
+          </span>
+        </td>
+        <td class="small nowrap">{{ g.decided_at.strftime('%d %b %Y %H:%M') if g.decided_at }}</td>
+        <td class="small muted">{{ g.rationale|truncate(110) if g.rationale else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

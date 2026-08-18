@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% set active = 'admin' %}
+{% block title %}AI configuration · CRAFT{% endblock %}
+
+{% block content %}
+<h1>AI providers and routing</h1>
+<p class="lede">
+  Every model call in the platform passes through one gateway, so provider,
+  budget, redaction and caching are enforced in a single place. Credentials are
+  sealed on receipt and never returned by the API or shown here.
+</p>
+
+{% if not policy.allowed %}
+<div class="banner bad">
+  <div>
+    <div class="banner-title">Model calls are currently blocked</div>
+    <div class="banner-body">{{ policy.reason }}</div>
+  </div>
+</div>
+{% elif policy.threshold_breached %}
+<div class="banner warn">
+  <div>
+    <div class="banner-title">Spend is approaching the cap</div>
+    <div class="banner-body">
+      {{ '%.0f'|format(policy.cost_utilisation * 100) }}% of the monthly cost cap and
+      {{ '%.0f'|format(policy.token_utilisation * 100) }}% of today's token budget are used.
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="tiles">
+  <div class="tile">
+    <div class="tile-label">Spend this month</div>
+    <div class="tile-value">${{ '%.2f'|format(policy.cost_this_month) }}</div>
+    <div class="tile-note">
+      {% if policy.cost_cap %}of a ${{ '%.0f'|format(policy.cost_cap) }} cap{% else %}no cap set{% endif %}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Tokens today</div>
+    <div class="tile-value">{{ '{:,}'.format(policy.tokens_today) }}</div>
+    <div class="tile-note">
+      {% if policy.token_budget %}of {{ '{:,}'.format(policy.token_budget) }}{% else %}no budget set{% endif %}
+    </div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Cache hit rate</div>
+    <div class="tile-value {{ 'ok' if cache.hit_rate > 0.3 }}">{{ '%.0f'|format(cache.hit_rate * 100) }}%</div>
+    <div class="tile-note">${{ '%.2f'|format(cache.saved) }} avoided in 30 days</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Providers</div>
+    <div class="tile-value">{{ providers|length }}</div>
+    <div class="tile-note">{{ models|length }} models, {{ routes|length }} routes</div>
+  </div>
+</div>
+
+<h2>Providers</h2>
+{% if providers %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Name</th><th style="width:150px">Type</th><th>Endpoint</th>
+               <th style="width:130px">Credential</th><th style="width:110px">Cache</th>
+               <th style="width:160px">Last check</th></tr></thead>
+    <tbody>
+    {% for p in providers %}
+      <tr>
+        <td><strong>{{ p.name }}</strong>{% if p.is_default %} <span class="pill pill-outline">default</span>{% endif %}</td>
+        <td class="small">{{ p.kind }}</td>
+        <td class="small mono muted">{{ p.base_url|truncate(46) }}</td>
+        <td class="small">
+          {% if p.credential_vault_ref %}<span class="pill pill-ok">vault</span>
+          {% elif p.credential_ciphertext %}<span class="pill pill-neutral">sealed ····{{ p.credential_hint }}</span>
+          {% else %}<span class="pill pill-outline">none</span>{% endif %}
+        </td>
+        <td class="small">
+          {% if p.supports_prompt_cache %}<span class="pill pill-ok">supported</span>
+          {% else %}<span class="muted">not supported</span>{% endif %}
+        </td>
+        <td class="small">
+          {% if p.last_health_at %}
+            <span class="pill {{ 'pill-ok' if p.last_health_ok else 'pill-bad' }}">
+              {{ 'reachable' if p.last_health_ok else 'failing' }}</span>
+            <div class="muted" style="margin-top:2px">{{ p.last_health_at.strftime('%d %b %H:%M') }}</div>
+          {% else %}<span class="muted">never tested</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty">
+  <strong>No provider connected</strong>
+  The platform runs without one — registers, workflows and approvals all work.
+  Connecting a provider adds the drafting and assessment steps.
+  <p class="small mono" style="margin-top:14px">POST /v1/admin/llm/providers</p>
+</div>
+{% endif %}
+
+<h2>Task routing</h2>
+{% if routes %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:180px">Task class</th><th>Purpose</th><th style="width:200px">Model</th>
+               <th style="width:110px">Fallbacks</th><th class="num" style="width:90px">Temp</th>
+               <th style="width:110px">Cache</th></tr></thead>
+    <tbody>
+    {% for r in routes %}
+      <tr>
+        <td class="mono">{{ r.task_class }}</td>
+        <td class="small muted">{{ r.description or '—' }}</td>
+        <td class="small">{{ model_names.get(r.model_id, 'unconfigured') }}</td>
+        <td class="small">{{ (r.fallback_model_ids or [])|length }}</td>
+        <td class="num small">{{ '%.1f'|format(r.temperature) }}</td>
+        <td class="small">
+          {% if r.cache_enabled and r.temperature == 0 %}<span class="pill pill-ok">on</span>
+          {% elif r.cache_enabled %}<span class="pill pill-outline">sampled</span>
+          {% else %}<span class="muted">off</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small muted" style="margin-top:10px">
+  Responses are only cached where temperature is zero. A sampled answer is not
+  reproducible, so replaying one as though it were would misrepresent it.
+</p>
+{% endif %}
+
+{% if spend.rows %}
+<h2>Where the spend goes</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:180px">Task class</th><th>Model</th><th class="num">Calls</th>
+               <th class="num">Tokens in</th><th class="num">Tokens out</th>
+               <th class="num">Cost</th><th class="num">Saved</th><th class="num">Latency</th></tr></thead>
+    <tbody>
+    {% for row in spend.rows %}
+      <tr>
+        <td class="mono small">{{ row.task_class }}</td>
+        <td class="small">{{ row.model_key }}</td>
+        <td class="num">{{ row.calls }}</td>
+        <td class="num">{{ '{:,}'.format(row.tokens_in) }}</td>
+        <td class="num">{{ '{:,}'.format(row.tokens_out) }}</td>
+        <td class="num">${{ '%.3f'|format(row.cost) }}</td>
+        <td class="num" style="color:var(--ok)">${{ '%.3f'|format(row.saved) }}</td>
+        <td class="num small muted">{{ row.avg_latency_ms }}ms</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

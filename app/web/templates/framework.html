@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active = 'compliance' %}
+{% block title %}{{ framework.code }} · CRAFT{% endblock %}
+
+{% block content %}
+<h1>{{ framework.name }}</h1>
+<p class="lede">
+  {{ readiness.applicable }} of {{ readiness.total_controls }} controls apply.
+  {{ '%.0f'|format(readiness.readiness_pct) }}% readiness,
+  {{ '%.0f'|format(readiness.evidenced_pct) }}% of claims carry current evidence.
+</p>
+
+<div class="filters">
+  <a href="/compliance/{{ framework.code }}" class="{{ 'on' if not active_status and not active_section }}">All</a>
+  {% for s in ['not_started','in_progress','implemented','operating','not_applicable'] %}
+    <a href="/compliance/{{ framework.code }}?status={{ s }}"
+       class="{{ 'on' if active_status == s }}">{{ s|replace('_',' ')|capitalize }}
+       ({{ readiness.status_counts.get(s, 0) }})</a>
+  {% endfor %}
+</div>
+
+{% if active_section %}
+<p class="small muted">Filtered to section <strong>{{ active_section }}</strong> ·
+  <a href="/compliance/{{ framework.code }}">clear</a></p>
+{% endif %}
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:90px">Reference</th>
+        <th>Control</th>
+        <th style="width:120px">Theme</th>
+        <th style="width:120px">Status</th>
+        <th class="num" style="width:80px">Maturity</th>
+        <th class="num" style="width:70px">Gaps</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for impl, ctl in controls %}
+      <tr>
+        <td class="mono nowrap">{{ ctl.ref_code }}</td>
+        <td>
+          {{ ctl.title }}
+          {% if not impl.is_applicable %}
+            <div class="small muted" style="margin-top:3px">
+              Excluded:
+              {% if impl.applicability_justification %}{{ impl.applicability_justification }}
+              {% else %}<span class="pill pill-bad">no justification recorded</span>{% endif %}
+            </div>
+          {% elif impl.how_implemented %}
+            <div class="small muted" style="margin-top:3px">{{ impl.how_implemented|truncate(150) }}</div>
+          {% endif %}
+        </td>
+        <td class="small muted">{{ ctl.theme or ctl.section }}</td>
+        <td>
+          {% set st = impl.status.value %}
+          <span class="pill {{ 'pill-ok' if st == 'operating' else ('pill-neutral' if st in ['implemented','in_progress'] else ('pill-outline' if st == 'not_applicable' else 'pill-warn')) }}">
+            {{ st|replace('_',' ') }}
+          </span>
+        </td>
+        <td class="num">{{ impl.maturity }}</td>
+        <td class="num">
+          {% set g = gap_counts.get(impl.id, 0) %}
+          {% if g %}<span class="pill pill-bad">{{ g }}</span>{% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if not controls %}
+<div class="empty"><strong>No controls match this filter</strong>Clear the filter to see the full set.</div>
+{% endif %}
+{% endblock %}

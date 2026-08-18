@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard · CRAFT{% endblock %}
+
+{% block content %}
+<div class="headline {{ headline.tone }}">
+  <div class="headline-text">{{ headline.text }}</div>
+  <div class="headline-detail">{{ headline.detail }}
+    <a href="{{ headline.link }}">Open →</a></div>
+</div>
+
+<div class="tiles">
+  <div class="tile">
+    <div class="tile-label">Risks above appetite</div>
+    <div class="tile-value {{ 'bad' if risk.above_appetite else 'ok' }}">{{ risk.above_appetite }}</div>
+    <div class="tile-note">of {{ risk.total }} on the register</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Decisions waiting</div>
+    <div class="tile-value {{ 'warn' if pending_gates else 'ok' }}">{{ pending_gates|length }}</div>
+    <div class="tile-note">approval gates open</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Gaps overdue</div>
+    <div class="tile-value {{ 'bad' if overdue_gaps else 'ok' }}">{{ overdue_gaps }}</div>
+    <div class="tile-note">{{ gaps_by_severity.values()|sum }} open in total</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">Open incidents</div>
+    <div class="tile-value {{ 'warn' if open_incidents else 'ok' }}">{{ open_incidents }}</div>
+    <div class="tile-note">{{ dsar_open }} subject request{{ '' if dsar_open == 1 else 's' }} in flight</div>
+  </div>
+  <div class="tile">
+    <div class="tile-label">AI spend, 30 days</div>
+    <div class="tile-value">${{ '%.2f'|format(spend.total_cost) }}</div>
+    <div class="tile-note">${{ '%.2f'|format(spend.total_saved) }} saved by caching</div>
+  </div>
+</div>
+
+<div class="cols-2" style="margin-top:26px">
+  <section>
+    <h2>{{ heatmap.total }} open risk{{ '' if heatmap.total == 1 else 's' }} plotted on the {{ heatmap.basis }} matrix</h2>
+    <div class="card">
+      <table class="heatmap" style="margin:0 auto">
+        <tr>
+          <th></th>
+          <th colspan="5" style="padding-bottom:8px">Impact →</th>
+        </tr>
+        {% for likelihood in [5,4,3,2,1] %}
+        <tr>
+          <th style="text-align:right;padding-right:8px">
+            {{ likelihood }}{% if likelihood == 5 %} <span class="muted">L</span>{% endif %}
+          </th>
+          {% for impact in [1,2,3,4,5] %}
+            {% set cell = heatmap.cells[likelihood][impact] %}
+            <td class="{{ 'hm-' ~ cell.band if cell.count else 'empty' }}"
+                title="Likelihood {{ likelihood }} × impact {{ impact }} = {{ likelihood * impact }} ({{ cell.band|replace('_',' ') }})">
+              {{ cell.count if cell.count else '·' }}
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+        <tr>
+          <th></th>
+          {% for impact in [1,2,3,4,5] %}<th>{{ impact }}</th>{% endfor %}
+        </tr>
+      </table>
+      <p class="small muted" style="margin:14px 0 0;text-align:center">
+        Residual position where scored, inherent otherwise. Each cell counts risks,
+        not their severity.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>{{ programmes|length }} compliance programme{{ '' if programmes|length == 1 else 's' }} in progress</h2>
+    {% if programmes %}
+    <div class="card stack">
+      {% for p in programmes %}
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div>
+            <a href="/compliance/{{ p.code }}"><strong>{{ p.name }}</strong></a>
+            <span class="pill pill-neutral" style="margin-left:6px">{{ p.phase|replace('_',' ') }}</span>
+          </div>
+          <span class="bar-figure">{{ '%.0f'|format(p.readiness_pct) }}%</span>
+        </div>
+        <div class="bar" style="margin-top:6px"><span style="width:{{ p.readiness_pct }}%"></span></div>
+        <div class="small muted" style="margin-top:5px">
+          {{ p.applicable }} applicable ·
+          {{ p.evidenced_pct|round|int }}% evidenced ·
+          {{ p.open_gaps }} open gap{{ '' if p.open_gaps == 1 else 's' }}
+          {% if not p.certification_ready and p.certifiable %}
+            · <span class="pill pill-warn">not certification-ready</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <strong>No programme started</strong>
+      Choose a framework on the <a href="/compliance">Compliance</a> page to begin.
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+{% if pending_gates %}
+<h2>Decisions waiting on a person</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Decision</th><th>Type</th><th>Why it stopped</th><th>Raised</th><th>Due</th></tr>
+    </thead>
+    <tbody>
+    {% for g in pending_gates %}
+      <tr>
+        <td><a href="/approvals">{{ g.summary }}</a></td>
+        <td class="mono small">{{ g.gate_type }}</td>
+        <td><span class="pill pill-outline">{{ g.reason.value|replace('_',' ') }}</span></td>
+        <td class="small muted nowrap">{{ g.raised_at.strftime('%d %b %H:%M') }}</td>
+        <td class="small nowrap">
+          {% if g.due_at %}
+            {% if g.due_at < now %}<span class="pill pill-bad">overdue</span>
+            {% else %}{{ g.due_at.strftime('%d %b %H:%M') }}{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if top_risks %}
+<h2>The five largest exposures</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Reference</th><th>Risk</th><th>Category</th>
+        <th class="num">Inherent</th><th class="num">Residual</th><th>Band</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in top_risks %}
+      <tr>
+        <td class="mono nowrap"><a href="/risks">{{ r.risk_ref }}</a></td>
+        <td>{{ r.title }}</td>
+        <td class="small muted">{{ r.category|replace('_',' ') }}</td>
+        <td class="num">{{ r.inherent_score }}</td>
+        <td class="num"><strong>{{ r.residual_score if r.residual_score is not none else '—' }}</strong></td>
+        <td><span class="pill pill-{{ r.severity_band.value }}">{{ r.severity_band.value|replace('_',' ') }}</span></td>
+        <td class="small">{{ r.status.value }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="cols-2" style="margin-top:26px">
+  <section>
+    <h3>Audit log</h3>
+    <div class="card">
+      <div class="tile-value" style="font-size:24px">{{ audit_head[0] or 0 }}</div>
+      <div class="tile-note">entries, chain head <span class="mono">{{ audit_head[1] or '—' }}</span></div>
+      <p class="small muted" style="margin-bottom:0">
+        The log is append-only at the database level and hash-chained.
+        {% if can('sec.auditlog.read') %}<a href="/audit">Verify the chain →</a>{% endif %}
+      </p>
+    </div>
+  </section>
+  <section>
+    <h3>Prompt cache, 30 days</h3>
+    <div class="card">
+      <div class="tile-value" style="font-size:24px">{{ '%.0f'|format(cache.hit_rate * 100) }}%</div>
+      <div class="tile-note">
+        hit rate over {{ cache.total_calls }} call{{ '' if cache.total_calls == 1 else 's' }}
+      </div>
+      <p class="small muted" style="margin-bottom:0">
+        {% if cache.total_calls %}
+          ${{ '%.2f'|format(cache.saved) }} avoided by reusing identical
+          deterministic prompts.
+        {% else %}
+          No model calls yet. Connect a provider on the
+          {% if can('admin.llm.view') %}<a href="/admin/ai">AI</a>{% else %}AI{% endif %} page.
+        {% endif %}
+      </p>
+    </div>
+  </section>
+</div>
+{% endblock %}

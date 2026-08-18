@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% set active = 'compliance' %}
+{% block title %}Compliance · CRAFT{% endblock %}
+
+{% block content %}
+<h1>Compliance journey</h1>
+<p class="lede">
+  Readiness is weighted by implementation status and discounted where a claim
+  has no current evidence, because an auditor will not accept an unevidenced
+  claim either. Certification readiness is judged separately and more strictly:
+  a single unimplemented mandatory clause blocks it whatever the headline
+  percentage says.
+</p>
+
+<div class="stack">
+{% for row in rows %}
+  {% set fw = row.framework %}
+  {% set r = row.readiness %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;gap:24px;align-items:flex-start">
+      <div style="flex:1">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <h2 style="margin:0;font-size:17px">
+            {% if row.programme %}<a href="/compliance/{{ fw.code }}">{{ fw.name }}</a>
+            {% else %}{{ fw.name }}{% endif %}
+          </h2>
+          {% if fw.certifiable %}<span class="pill pill-outline">certifiable</span>{% endif %}
+          {% if row.programme %}
+            <span class="pill pill-neutral">{{ row.programme.phase|replace('_',' ') }}</span>
+          {% endif %}
+        </div>
+        <div class="small muted" style="margin-top:3px">
+          {{ fw.issuer }} · {{ fw.edition }} · {{ row.control_count }} controls
+        </div>
+        {% if fw.description %}
+        <p class="small" style="margin:8px 0 0;max-width:70ch">{{ fw.description }}</p>
+        {% endif %}
+      </div>
+
+      {% if r %}
+      <div style="text-align:right;min-width:170px">
+        <div class="tile-value" style="font-size:32px">{{ '%.0f'|format(r.readiness_pct) }}%</div>
+        <div class="bar" style="margin:6px 0 6px auto;width:150px">
+          <span style="width:{{ r.readiness_pct }}%"></span>
+        </div>
+        <div class="small muted">{{ '%.0f'|format(r.evidenced_pct) }}% evidenced</div>
+      </div>
+      {% else %}
+      <div style="text-align:right">
+        <span class="pill pill-outline">not started</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if r %}
+    <div class="tiles" style="margin-top:18px">
+      <div class="tile">
+        <div class="tile-label">Applicable</div>
+        <div class="tile-value" style="font-size:22px">{{ r.applicable }}</div>
+        <div class="tile-note">{{ r.excluded }} excluded</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Operating</div>
+        <div class="tile-value" style="font-size:22px">{{ r.status_counts.get('operating', 0) }}</div>
+        <div class="tile-note">{{ r.status_counts.get('implemented', 0) }} implemented, not yet proven</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Not started</div>
+        <div class="tile-value {{ 'warn' if r.status_counts.get('not_started', 0) }}" style="font-size:22px">
+          {{ r.status_counts.get('not_started', 0) }}
+        </div>
+        <div class="tile-note">average maturity {{ '%.1f'|format(r.average_maturity) }} / 5</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Open gaps</div>
+        <div class="tile-value {{ 'bad' if r.high_gaps else ('warn' if r.open_gaps else 'ok') }}" style="font-size:22px">
+          {{ r.open_gaps }}
+        </div>
+        <div class="tile-note">{{ r.high_gaps }} high or above</div>
+      </div>
+    </div>
+
+    {% if fw.certifiable %}
+      {% if r.certification_ready %}
+      <div class="banner ok" style="margin:18px 0 0">
+        <div>
+          <div class="banner-title">Nothing blocks certification</div>
+          <div class="banner-body">
+            Every mandatory clause is implemented, no high-severity gap is open and
+            every exclusion carries a justification.
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="banner warn" style="margin:18px 0 0">
+        <div>
+          <div class="banner-title">
+            {{ r.blockers|length }} thing{{ '' if r.blockers|length == 1 else 's' }} would block certification today
+          </div>
+          <div class="banner-body">
+            <ul style="margin:6px 0 0;padding-left:18px">
+              {% for b in r.blockers[:4] %}<li>{{ b }}</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    {% if r.sections %}
+    <h3 style="margin-top:22px">Readiness by section</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Section</th><th class="num">Applicable</th><th class="num">Operating</th>
+            <th class="num">In progress</th><th class="num">Not started</th><th style="width:200px">Readiness</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for s in r.sections %}
+          <tr>
+            <td><a href="/compliance/{{ fw.code }}?section={{ s.section|urlencode }}">{{ s.section }}</a></td>
+            <td class="num">{{ s.applicable }}</td>
+            <td class="num">{{ s.operating }}</td>
+            <td class="num">{{ s.in_progress }}</td>
+            <td class="num {{ 'muted' if not s.not_started }}">{{ s.not_started }}</td>
+            <td>
+              <div class="bar-row">
+                <div class="bar thin"><span style="width:{{ s.readiness_pct }}%"></span></div>
+                <span class="bar-figure small">{{ '%.0f'|format(s.readiness_pct) }}%</span>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="small muted" style="margin:14px 0 0">
+      Start this programme through
+      <span class="mono">POST /v1/compliance/programmes</span> to create an
+      implementation record for each of its {{ row.control_count }} controls.
+    </p>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+{% endblock %}
