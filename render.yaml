@@ -1,0 +1,88 @@
+# Render blueprint. Push this repository, point Render at it, and the service
+# and its database are provisioned together.
+#
+# One deployment note that matters more than the rest: Render's managed
+# PostgreSQL gives you a single database user, and that user owns the schema.
+# PostgreSQL exempts a table owner from row-level security unless FORCE is set —
+# migration 0002 sets it — but it does NOT exempt you from the fact that the
+# serving credential can also alter the schema and disable triggers. Where you
+# can run a separate credential, do: create the craft_app role (migration 0003
+# does this for you) and set CRAFT_DATABASE_URL to it, keeping the owner URL in
+# CRAFT_MIGRATION_DATABASE_URL. The README explains how.
+
+# NOTE ON RUNTIME. This blueprint declares a Docker service, because the
+# repository has a Dockerfile and Render will use it. If you create the service
+# by hand instead of from this file, none of the envVars below are applied —
+# they are a property of the blueprint, not of the repository — and the service
+# starts with no configuration at all. That failure is now caught by the
+# entrypoint's preflight rather than by a silent exit.
+
+services:
+  - type: web
+    name: craft
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # 512 MB. Sufficient for a single-tenant deployment.
+    region: frankfurt      # Keep data in-region; change to match your obligations.
+    branch: main
+    # Migrations run once per deploy, before any instance serves traffic, so a
+    # schema change cannot race an instance that has already started.
+    preDeployCommand: python -m app.migrate
+    # No startCommand: the image's ENTRYPOINT runs the configuration preflight,
+    # binds $PORT and takes its worker count from WEB_CONCURRENCY, which Render
+    # sets from the instance's CPU and memory. The previous startCommand
+    # hard-coded --workers 2 and overrode that.
+    healthCheckPath: /readyz
+    autoDeploy: true
+    envVars:
+      # No PYTHON_VERSION: the base image pins it. Setting it on a Docker
+      # service does nothing, and a setting that does nothing is worse than
+      # absent — it reads as a control that is in place.
+
+      # Supplied by the database below.
+      - key: CRAFT_DATABASE_URL
+        fromDatabase:
+          name: craft-db
+          property: connectionString
+      - key: CRAFT_MIGRATION_DATABASE_URL
+        fromDatabase:
+          name: craft-db
+          property: connectionString
+
+      # Generated once by Render and then held. Losing CRAFT_ENCRYPTION_KEY
+      # means every stored provider credential becomes unreadable and has to be
+      # re-entered, so back it up somewhere outside Render.
+      - key: CRAFT_SECRET_KEY
+        generateValue: true
+      - key: CRAFT_ENCRYPTION_KEY
+        sync: false          # Fernet key. Set manually; see the README.
+      - key: CRAFT_APP_DB_PASSWORD
+        generateValue: true
+
+      - key: CRAFT_ENVIRONMENT
+        value: production
+      - key: CRAFT_AUTO_MIGRATE
+        value: "false"       # preDeployCommand owns this. Set "true" only if
+                             # you create the service by hand and cannot set a
+                             # pre-deploy command; the entrypoint will then
+                             # apply migrations before serving.
+      - key: CRAFT_AUTO_SEED
+        value: "true"        # Idempotent; converges reference data on each boot.
+      - key: CRAFT_ENABLE_OUTBOX_RELAY
+        value: "true"
+      - key: CRAFT_ALLOW_LOCAL_LOGIN
+        value: "true"        # Set false once an identity provider is federated.
+      - key: CRAFT_BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: CRAFT_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false          # Leave unset and read the generated one from the logs.
+      - key: CRAFT_BASE_URL
+        sync: false
+
+databases:
+  - name: craft-db
+    databaseName: craft
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "16"
+    ipAllowList: []          # Private network only; no public access.
